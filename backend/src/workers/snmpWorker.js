@@ -54,6 +54,18 @@ const createOrUpdateAlert = async (device, key, payload) => {
   return alert;
 };
 
+const autoResolveAlert = async (device, key) => {
+  const dedupKey = `${key}:${device._id}`;
+  const alert = await Alert.findOne({ dedupKey, status: { $in: ['open', 'acknowledged'] } });
+  if (alert) {
+    alert.status = 'resolved';
+    alert.resolvedAt = new Date();
+    alert.resolutionNote = 'Tự động khôi phục về ngưỡng bình thường.';
+    await alert.save();
+    if (io) io.emit('alert:updated', { event: 'alert:updated', data: alert });
+  }
+};
+
 const runSnmpCycle = async () => {
   const startedAt = Date.now();
   try {
@@ -91,35 +103,76 @@ const runSnmpCycle = async () => {
           metric: 'snmp_reachable',
           currentValue: 0,
         });
+      } else {
+        // Auto-resolve unreachable if back
+        await autoResolveAlert(device, 'snmp_unreachable');
+      }
+
+      // Store interface data on DeviceState
+      if (result.interfaces?.length) {
+        state.interfaces = result.interfaces.map((iface) => ({
+          index: iface.index,
+          name: iface.name,
+          status: iface.status,
+          inOctets: iface.inOctets,
+          outOctets: iface.outOctets,
+          inErrors: iface.inErrors,
+          outErrors: iface.outErrors,
+          updatedAt: new Date(),
+        }));
       }
 
       for (const sample of result.metrics || []) {
         await saveTelemetry(device, sample.metric, sample.value, sample.unit);
+
+        // Update state with known metrics
         if (sample.metric === 'cpu_pct') state.cpuPct = sample.value;
         if (sample.metric === 'memory_pct') state.memoryPct = sample.value;
         if (sample.metric === 'sys_uptime_sec') state.uptimeSec = sample.value;
 
+        // ── Alert: High CPU ──
         if (sample.metric === 'cpu_pct' && sample.value >= 90) {
           await createOrUpdateAlert(device, 'high_cpu', {
             ruleId: 'rule_high_cpu',
             title: 'High CPU',
-            titleVi: 'CPU cao',
+            titleVi: 'CPU cao bất thường',
             severity: 'high',
             metric: 'cpu_pct',
             currentValue: sample.value,
             threshold: { operator: 'gte', value: 90 },
           });
+        } else if (sample.metric === 'cpu_pct' && sample.value < 85) {
+          await autoResolveAlert(device, 'high_cpu');
         }
+
+        // ── Alert: High Memory ──
         if (sample.metric === 'memory_pct' && sample.value >= 90) {
           await createOrUpdateAlert(device, 'high_memory', {
             ruleId: 'rule_high_memory',
             title: 'High Memory',
-            titleVi: 'RAM cao',
+            titleVi: 'RAM cao bất thường',
             severity: 'high',
             metric: 'memory_pct',
             currentValue: sample.value,
             threshold: { operator: 'gte', value: 90 },
           });
+        } else if (sample.metric === 'memory_pct' && sample.value < 85) {
+          await autoResolveAlert(device, 'high_memory');
+        }
+
+        // ── Alert: Interface Down ──
+        if (sample.metric === 'if_down_count' && sample.value > 0) {
+          await createOrUpdateAlert(device, 'interface_down', {
+            ruleId: 'rule_interface_down',
+            title: 'Interface(s) Down',
+            titleVi: 'Có cổng mạng bị ngắt kết nối',
+            severity: 'warning',
+            metric: 'if_down_count',
+            currentValue: sample.value,
+            threshold: { operator: 'gt', value: 0 },
+          });
+        } else if (sample.metric === 'if_down_count' && sample.value === 0) {
+          await autoResolveAlert(device, 'interface_down');
         }
       }
 
@@ -137,6 +190,8 @@ const runSnmpCycle = async () => {
             cpuPct: state.cpuPct,
             memoryPct: state.memoryPct,
             uptimeSec: state.uptimeSec,
+            snmpReachable: state.snmpReachable,
+            interfaceCount: state.interfaces?.length || 0,
             lastSeenAt: state.lastSeenAt,
           },
         });
