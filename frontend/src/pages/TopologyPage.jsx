@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ReactFlow, MiniMap, Controls, Background, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
+import { ReactFlow, MiniMap, Controls, Background, useNodesState, useEdgesState, addEdge, Panel } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import api from '../services/api';
 import { getSocket } from '../sockets';
-import { Save, RefreshCw, Loader2, Server, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Save, RefreshCw, Loader2, Server, LayoutTemplate } from 'lucide-react';
+import dagre from 'dagre';
 
 const statusColors = {
   online: '#22C55E', // nms-green
@@ -32,17 +33,62 @@ const nodeTypes = {
   device: CustomNode,
 };
 
+const dagreGraph = new dagre.graphlib.Graph();
+dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+const getLayoutedElements = (nodes, edges, direction = 'TB') => {
+  const isHorizontal = direction === 'LR';
+  dagreGraph.setGraph({ rankdir: direction });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: 180, height: 80 }); // Standardized node sizes
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const newNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    const newNode = { ...node };
+    newNode.targetPosition = isHorizontal ? 'left' : 'top';
+    newNode.sourcePosition = isHorizontal ? 'right' : 'bottom';
+    
+    newNode.position = {
+      x: nodeWithPosition.x - 90,
+      y: nodeWithPosition.y - 40,
+    };
+    return newNode;
+  });
+
+  return { nodes: newNodes, edges };
+};
+
 export default function TopologyPage() {
   const { t } = useTranslation();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [collectors, setCollectors] = useState([]);
+  const [selectedCollector, setSelectedCollector] = useState('');
 
-  const fetchTopology = async () => {
+  const fetchCollectors = async () => {
+    try {
+      const res = await api.get('/api/v1/collectors');
+      setCollectors(res.data.data || []);
+    } catch (error) {
+      console.error('Failed to load collectors', error);
+    }
+  };
+
+  const fetchTopology = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await api.get('/api/v1/topology');
+      const url = selectedCollector ? `/api/v1/topology?collectorId=${selectedCollector}` : '/api/v1/topology';
+      const res = await api.get(url);
       
       const mappedNodes = res.data.data.nodes.map(n => ({
         id: n.id,
@@ -59,21 +105,48 @@ export default function TopologyPage() {
         style: { stroke: '#3A4B5C', strokeWidth: 2 },
       }));
 
-      // Apply some basic layout if everything is at 0,0 (just a fallback)
+      // Auto Layout check if nodes are placed at 0,0
       if (mappedNodes.length > 0 && mappedNodes.every(n => n.position.x === 0 && n.position.y === 0)) {
-         mappedNodes.forEach((n, i) => {
-           n.position = { x: (i % 5) * 200 + 100, y: Math.floor(i / 5) * 150 + 100 };
-         });
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+          mappedNodes,
+          mappedEdges,
+          'TB'
+        );
+        setNodes([...layoutedNodes]);
+        setEdges([...layoutedEdges]);
+      } else {
+        setNodes(mappedNodes);
+        setEdges(mappedEdges);
       }
-
-      setNodes(mappedNodes);
-      setEdges(mappedEdges);
     } catch (error) {
       console.error('Failed to load topology', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCollector, setNodes, setEdges]);
+
+  const onLayout = useCallback(
+    (direction) => {
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+        nodes,
+        edges,
+        direction
+      );
+      setNodes([...layoutedNodes]);
+      setEdges([...layoutedEdges]);
+      
+      // Hack to auto fit-view after layout runs
+      setTimeout(() => {
+        const fitViewBtn = document.querySelector('.react-flow__controls-fitview');
+        if (fitViewBtn) fitViewBtn.click();
+      }, 50);
+    },
+    [nodes, edges]
+  );
+
+  useEffect(() => {
+    fetchCollectors();
+  }, []);
 
   useEffect(() => {
     fetchTopology();
@@ -100,20 +173,28 @@ export default function TopologyPage() {
         socket.off('topology:updated', fetchTopology);
       }
     };
-  }, [setNodes]);
+  }, [fetchTopology, setNodes]); // Include fetchTopology as dependency
 
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#3A4B5C', strokeWidth: 2 } }, eds)), [setEdges]);
 
   const handleSave = async () => {
     try {
       setSaving(true);
+      // Save Links
       await Promise.all(edges.map(edge => api.post('/api/v1/topology/links', {
         sourceDeviceId: edge.source,
         targetDeviceId: edge.target,
         linkType: edge.type || 'default',
         status: 'active',
       }).catch(() => null)));
-      // In a real app we'd save node positions too, but keeping it simple for edges right now
+      
+      // Save Node Positions
+      const nodePositions = nodes.map(n => ({
+        id: n.id,
+        position: n.position
+      }));
+      await api.post('/api/v1/topology/positions', { nodes: nodePositions });
+      
     } catch (error) {
       console.error('Failed to save topology', error);
     } finally {
@@ -124,8 +205,23 @@ export default function TopologyPage() {
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col space-y-4 animate-fade-in">
       <div className="flex items-center justify-between shrink-0">
-        <h1 className="text-page-title text-nms-text">{t('nav.topology', 'Bản đồ mạng')}</h1>
-        <div className="flex gap-3">
+        <h1 className="text-page-title text-nms-text">{t('nav.topology', 'Sơ đồ mạng')}</h1>
+        <div className="flex gap-3 items-center">
+          <select 
+            value={selectedCollector} 
+            onChange={(e) => setSelectedCollector(e.target.value)}
+            className="bg-nms-surface border border-nms-border text-nms-text text-sm rounded-lg px-3 py-2 outline-none focus:border-nms-brand"
+          >
+            <option value="">{t('common.all', 'Tất cả')} Collectors</option>
+            {collectors.map(c => (
+              <option key={c._id} value={c._id}>{c.name}</option>
+            ))}
+          </select>
+
+          <button onClick={() => onLayout('TB')} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-nms-surface border border-nms-border hover:border-nms-brand text-sm text-nms-text-secondary hover:text-nms-text transition-all">
+            <LayoutTemplate size={14} />
+            {t('common.autoLayout', 'Auto Layout')}
+          </button>
           <button onClick={fetchTopology} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-nms-surface border border-nms-border hover:border-nms-brand text-sm text-nms-text-secondary hover:text-nms-text transition-all">
             <RefreshCw size={14} />
             {t('common.refresh', 'Làm mới')}

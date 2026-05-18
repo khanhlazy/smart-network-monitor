@@ -20,6 +20,10 @@ const deviceSchema = new mongoose.Schema({
     room: { type: String },
   },
   tags: [{ type: String }],
+  coordinates: {
+    x: { type: Number, default: 0 },
+    y: { type: Number, default: 0 }
+  },
   monitoringProfileId: { type: String },
   collectorId: { type: String },
   credentialProfileIds: [{ type: String }],

@@ -11,6 +11,7 @@
   "dependencies": {
     "@xyflow/react": "^12.10.2",
     "axios": "^1.6.2",
+    "dagre": "^0.8.5",
     "file-saver": "^2.0.5",
     "i18next": "^23.7.6",
     "lucide-react": "^0.294.0",

@@ -10,6 +10,12 @@ const AlertRule = require('../modules/alerts/alertRule.model');
 const Collector = require('../modules/collectors/collector.model');
 const TelemetrySample = require('../modules/telemetry/telemetrySample.model');
 const TopologyLink = require('../modules/devices/topologyLink.model');
+const Report = require('../modules/reports/report.model');
+const Incident = require('../modules/incidents/incident.model');
+const AuditLog = require('../modules/audit/auditLog.model');
+const NotificationChannel = require('../modules/notifications/notificationChannel.model');
+const Credential = require('../modules/credentials/credential.model');
+const MaintenanceWindow = require('../modules/maintenance/maintenanceWindow.model');
 
 const seed = async () => {
   try {
@@ -27,10 +33,16 @@ const seed = async () => {
       Collector.deleteMany({}),
       TelemetrySample.deleteMany({}),
       TopologyLink.deleteMany({}),
+      Report.deleteMany({}),
+      Incident.deleteMany({}),
+      AuditLog.deleteMany({}),
+      NotificationChannel.deleteMany({}),
+      Credential.deleteMany({}),
+      MaintenanceWindow.deleteMany({}),
     ]);
     console.log('Cleared existing data');
 
-    // Create Roles
+    // 1. Create Roles
     const superAdminRole = await Role.create({
       name: 'Super Admin',
       nameVi: 'Quản trị hệ thống',
@@ -47,7 +59,7 @@ const seed = async () => {
       descriptionVi: 'Giám sát và quản lý cảnh báo',
       permissions: [
         'device:read', 'alert:read', 'alert:acknowledge', 'alert:resolve',
-        'dashboard:read', 'collector:read', 'audit:read',
+        'dashboard:read', 'collector:read', 'audit:read', 'topology:read', 'topology:manage'
       ],
       isSystem: true,
     });
@@ -57,13 +69,12 @@ const seed = async () => {
       nameVi: 'Người xem',
       description: 'Read-only access',
       descriptionVi: 'Quyền xem dữ liệu',
-      permissions: ['device:read', 'alert:read', 'dashboard:read'],
+      permissions: ['device:read', 'alert:read', 'dashboard:read', 'topology:read'],
       isSystem: true,
     });
-
     console.log('[Seed] Roles created');
 
-    // Create Users
+    // 2. Create Users
     await User.create({
       fullName: 'Nguyễn Văn An',
       username: 'admin',
@@ -93,14 +104,13 @@ const seed = async () => {
       status: 'active',
       preferences: { language: 'vi', theme: 'dark' },
     });
-
     console.log('[Seed] Users created');
 
-    console.log('\n[Seed] Completed successfully!');
+    console.log('\n[Seed] Completed successfully! 🎉');
     console.log('\n[Seed] Default accounts:');
-    console.log('   Admin:    admin / Admin@123');
-    console.log('   Operator: operator / Operator@123');
-    console.log('   Viewer:   viewer / Viewer@123\n');
+    console.log('   👑 Admin:    admin / Admin@123');
+    console.log('   🛠️ Operator: operator / Operator@123');
+    console.log('   👁️ Viewer:   viewer / Viewer@123\n');
 
     process.exit(0);
   } catch (error) {

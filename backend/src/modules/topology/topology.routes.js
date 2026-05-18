@@ -20,10 +20,11 @@ const emitTopologyUpdated = (req, link) => {
 
 router.get('/', authorize('topology:read', 'topology.manage', 'device:read', '*'), async (req, res) => {
   try {
-    const { siteId, type } = req.query;
+    const { siteId, type, collectorId } = req.query;
     const deviceFilter = { deletedAt: null };
     if (siteId) deviceFilter.siteId = siteId;
     if (type) deviceFilter.type = type;
+    if (collectorId) deviceFilter.collectorId = collectorId;
 
     const devices = await Device.find(deviceFilter).lean();
     const deviceIds = devices.map(device => device._id);
@@ -41,8 +42,9 @@ router.get('/', authorize('topology:read', 'topology.manage', 'device:read', '*'
     }).lean();
 
     const nodes = devices.map((device, index) => {
-      const angle = (index / Math.max(devices.length, 1)) * Math.PI * 2;
-      const radius = Math.max(180, devices.length * 18);
+      // Use saved coordinates if they exist and are not 0,0, otherwise default to 0,0 for auto-layout on frontend
+      const x = device.coordinates?.x || 0;
+      const y = device.coordinates?.y || 0;
       return {
         id: device._id.toString(),
         type: 'device',
@@ -53,10 +55,7 @@ router.get('/', authorize('topology:read', 'topology.manage', 'device:read', '*'
           siteId: device.siteId,
           status: stateMap.get(device._id.toString())?.status || 'unknown',
         },
-        position: {
-          x: Math.round(Math.cos(angle) * radius + 500),
-          y: Math.round(Math.sin(angle) * radius + 320),
-        },
+        position: { x, y },
       };
     });
 
@@ -74,6 +73,32 @@ router.get('/', authorize('topology:read', 'topology.manage', 'device:read', '*'
     res.json({ data: { nodes, edges } });
   } catch (error) {
     console.error('Topology get error:', error);
+    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Lỗi hệ thống.' } });
+  }
+});
+
+router.post('/positions', authorize('topology:manage', 'topology.manage', '*'), async (req, res) => {
+  try {
+    const { nodes } = req.body; // Array of { id, position: { x, y } }
+    if (!Array.isArray(nodes)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Yêu cầu danh sách nodes.' } });
+    }
+
+    const bulkOps = nodes.map(node => ({
+      updateOne: {
+        filter: { _id: node.id },
+        update: { $set: { 'coordinates.x': node.position.x, 'coordinates.y': node.position.y } }
+      }
+    }));
+
+    if (bulkOps.length > 0) {
+      await Device.bulkWrite(bulkOps);
+    }
+
+    emitTopologyUpdated(req);
+    res.json({ data: { message: 'Đã lưu tọa độ sơ đồ.' } });
+  } catch (error) {
+    console.error('Save positions error:', error);
     res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Lỗi hệ thống.' } });
   }
 });
