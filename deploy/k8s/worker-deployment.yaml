@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smartnms-worker
+  namespace: smartnms
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smartnms-worker
+  template:
+    metadata:
+      labels:
+        app: smartnms-worker
+    spec:
+      containers:
+        - name: worker
+          image: smartnms-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "src/server.js"]
+          envFrom:
+            - configMapRef:
+                name: smartnms-config
+            - secretRef:
+                name: smartnms-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smartnms-config
+  namespace: smartnms
+data:
+  NODE_ENV: "production"
+  PORT: "5000"
+  CORS_ORIGIN: "https://smartnms.example.com"
+  PING_INTERVAL_MS: "30000"
+  PING_TIMEOUT_MS: "5000"
+  OFFLINE_FAILURE_THRESHOLD: "3"
+  SNMP_ENABLED: "true"
+  SNMP_INTERVAL_MS: "60000"
+  SSH_ENABLED: "true"
+  SSH_INTERVAL_MS: "120000"
+  ANOMALY_ENABLED: "true"
+  ANOMALY_INTERVAL_MS: "300000"
+  OTEL_ENABLED: "false"
+  OTEL_SERVICE_NAME: "smartnms-backend"

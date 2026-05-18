@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smartnms-frontend
+  namespace: smartnms
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: smartnms-frontend
+  template:
+    metadata:
+      labels:
+        app: smartnms-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: smartnms-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5173
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5173
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5173
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartnms-frontend
+  namespace: smartnms
+spec:
+  selector:
+    app: smartnms-frontend
+  ports:
+    - name: http
+      port: 5173
+      targetPort: 5173
