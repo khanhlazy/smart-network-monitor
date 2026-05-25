@@ -16,9 +16,10 @@ const setIO = (socketIO) => {
 
 const pingDevice = async (device) => {
   try {
+    const isWin = process.platform === 'win32';
     const result = await ping.promise.probe(device.managementIp, {
       timeout: Math.ceil(config.monitoring.pingTimeoutMs / 1000),
-      extra: ['-c', '3'],
+      extra: isWin ? ['-n', '3'] : ['-c', '3'],
     });
 
     let latencyMs = result.alive ? parseFloat(result.time) || 0 : null;
